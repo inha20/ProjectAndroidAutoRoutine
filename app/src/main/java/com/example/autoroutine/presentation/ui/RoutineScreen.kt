@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.autoroutine.data.local.RoutineEntity
+import com.example.autoroutine.presentation.state.RoutineUiState
 import com.example.autoroutine.presentation.viewmodel.RoutineViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -17,8 +18,8 @@ import com.example.autoroutine.presentation.viewmodel.RoutineViewModel
 fun AutoRoutineScreen(
     viewModel: RoutineViewModel = viewModel()
 ) {
-    val suggestedRoutines by viewModel.suggestedRoutines.collectAsState()
-    val activeRoutines by viewModel.activeRoutines.collectAsState()
+    // 단 하나의 StateFlow만 관찰하여 전체 UI 분기 달성 (UDF)
+    val uiState by viewModel.uiState.collectAsState()
 
     Scaffold(
         topBar = {
@@ -30,41 +31,68 @@ fun AutoRoutineScreen(
             )
         }
     ) { padding ->
-        Column(
+        Box(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
         ) {
-            // 제안된 루틴 영역 (사용자 승인 대기)
-            if (suggestedRoutines.isNotEmpty()) {
-                Text(
-                    text = "새로운 제안이 있습니다 ✨",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.padding(16.dp)
-                )
-                LazyColumn {
-                    items(suggestedRoutines) { routine ->
-                        RoutineSuggestionCard(
-                            routine = routine,
-                            onAccept = { viewModel.acceptRoutine(it) },
-                            onReject = { viewModel.rejectRoutine(it) }
-                        )
-                    }
+            when (val state = uiState) {
+                is RoutineUiState.Loading -> {
+                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                }
+                is RoutineUiState.Error -> {
+                    Text(
+                        text = state.message,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+                }
+                is RoutineUiState.Success -> {
+                    RoutineContent(
+                        suggestedRoutines = state.suggestedRoutines,
+                        activeRoutines = state.activeRoutines,
+                        onAccept = { viewModel.acceptRoutine(it) },
+                        onReject = { viewModel.rejectRoutine(it) },
+                        onToggle = { routine, isChecked -> viewModel.toggleRoutine(routine, isChecked) }
+                    )
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // 활성화된 내 루틴 영역
+@Composable
+fun RoutineContent(
+    suggestedRoutines: List<RoutineEntity>,
+    activeRoutines: List<RoutineEntity>,
+    onAccept: (RoutineEntity) -> Unit,
+    onReject: (RoutineEntity) -> Unit,
+    onToggle: (RoutineEntity, Boolean) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        if (suggestedRoutines.isNotEmpty()) {
             Text(
-                text = "내 루틴 (${activeRoutines.size})",
+                text = "새로운 제안이 있습니다 ✨",
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.padding(16.dp)
             )
-            LazyColumn {
-                items(activeRoutines) { routine ->
-                    ActiveRoutineCard(routine)
+            LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+                items(suggestedRoutines) { routine ->
+                    RoutineSuggestionCard(routine, onAccept, onReject)
                 }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = if (activeRoutines.isEmpty()) "활성화된 루틴이 없습니다." else "내 루틴 (${activeRoutines.size})",
+            style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(16.dp)
+        )
+        LazyColumn(modifier = Modifier.weight(1f)) {
+            items(activeRoutines) { routine ->
+                ActiveRoutineCard(routine, onToggle)
             }
         }
     }
@@ -93,20 +121,19 @@ fun RoutineSuggestionCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
             ) {
-                TextButton(onClick = { onReject(routine) }) {
-                    Text("무시")
-                }
+                TextButton(onClick = { onReject(routine) }) { Text("무시") }
                 Spacer(modifier = Modifier.width(8.dp))
-                Button(onClick = { onAccept(routine) }) {
-                    Text("루틴 만들기")
-                }
+                Button(onClick = { onAccept(routine) }) { Text("적용하기") }
             }
         }
     }
 }
 
 @Composable
-fun ActiveRoutineCard(routine: RoutineEntity) {
+fun ActiveRoutineCard(
+    routine: RoutineEntity,
+    onToggle: (RoutineEntity, Boolean) -> Unit
+) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -126,7 +153,7 @@ fun ActiveRoutineCard(routine: RoutineEntity) {
             }
             Switch(
                 checked = routine.isActive,
-                onCheckedChange = { /* Toggle logic */ }
+                onCheckedChange = { isChecked -> onToggle(routine, isChecked) }
             )
         }
     }
